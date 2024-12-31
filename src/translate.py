@@ -21,7 +21,8 @@ import torch
 import torch.optim as optim
 from torch.autograd import Variable
 import argparse
-
+from torch.utils.tensorboard import SummaryWriter
+writer = SummaryWriter()
 # Learning
 parser = argparse.ArgumentParser(description='Train RNN for human pose estimation')
 parser.add_argument('--learning_rate', dest='learning_rate',
@@ -70,7 +71,7 @@ parser.add_argument('--seq_length_out', dest='seq_length_out',
 parser.add_argument('--omit_one_hot', dest='omit_one_hot',
                   help='', action='store_true',
                   default=False)
-# Directories
+# Directories 
 parser.add_argument('--data_dir', dest='data_dir',
                   help='Data directory',
                   default=os.path.normpath("./data/h3.6m/dataset"), type=str)
@@ -88,6 +89,9 @@ parser.add_argument('--load', dest='load',
                   default=0, type=int)
 parser.add_argument('--sample', dest='sample',
                   help='Set to True for sampling.', action='store_true',
+                  default=False)
+parser.add_argument('--draw', dest='draw',
+                  help='Set to True for drawing.', action='store_true',
                   default=False)
 
 args = parser.parse_args()
@@ -150,9 +154,10 @@ def train():
 
   if True:
     model = create_model(actions, args.sample)
+    draw = 0
     if not args.use_cpu:
         model = model.cuda()
-
+    
     # === Read and denormalize the gt with srnn's seeds, as we'll need them
     # many times for evaluation in Euler Angles ===
     srnn_gts_euler = get_srnn_gts( actions, model, test_set, data_mean,
@@ -167,7 +172,7 @@ def train():
     optimiser = optim.SGD(model.parameters(), lr=args.learning_rate)
     #optimiser = optim.Adam(model.parameters(), lr=learning_rate, betas = (0.9, 0.999))
 
-    for _ in range( args.iterations ):
+    for epoch in range( args.iterations ):
       optimiser.zero_grad()
       model.train()
 
@@ -187,9 +192,12 @@ def train():
       encoder_inputs = Variable(encoder_inputs)
       decoder_inputs = Variable(decoder_inputs)
       decoder_outputs = Variable(decoder_outputs)
-
+      # if draw == 0:
+      #   writer.add_graph(model, input_to_model = (encoder_inputs, decoder_inputs))
+      #   writer.flush()
+      #   draw = 1
       preds = model(encoder_inputs, decoder_inputs)
-
+      
       step_loss = (preds-decoder_outputs)**2
       step_loss = step_loss.mean()
     
@@ -204,6 +212,7 @@ def train():
 
       step_time += (time.time() - start_time) / args.test_every
       loss += step_loss / args.test_every
+      writer.add_scalar("train loss", loss, epoch)
       current_step += 1
       # === step decay ===
       if current_step % args.learning_rate_step == 0:
@@ -236,7 +245,7 @@ def train():
         step_loss = step_loss.mean()
 
         val_loss = step_loss # Loss book-keeping
-
+        writer.add_scalar("validation loss", val_loss, epoch)
         print()
         print("{0: <16} |".format("milliseconds"), end="")
         for ms in [80, 160, 320, 400, 560, 1000]:
@@ -335,13 +344,14 @@ def train():
               val_loss, srnn_loss))
 
         torch.save(model, train_dir + '/model_' + str(current_step))
-
+        
         print()
         previous_losses.append(loss)
 
         # Reset global time and loss
         step_time, loss = 0, 0
-
+        writer.flush()
+        writer.close()
         sys.stdout.flush()
 
 
@@ -380,7 +390,7 @@ def get_srnn_gts( actions, model, test_set, data_mean, data_std, dim_to_ignore, 
           for k in np.arange(3,97,3):
             denormed[j,k:k+3] = data_utils.rotmat2euler( data_utils.expmap2rotmat( denormed[j,k:k+3] ))
 
-      srnn_gt_euler.append( denormed );
+      srnn_gt_euler.append( denormed )
 
     # Put back in the dictionary
     srnn_gts_euler[action] = srnn_gt_euler
@@ -457,6 +467,9 @@ def sample():
           hf.create_dataset( node_name, data=srnn_gts_expmap[action][i] )
           # Save prediction
           node_name = 'expmap/preds/{1}_{0}'.format(i, action)
+          print()
+          print(node_name)
+          print()
           hf.create_dataset( node_name, data=srnn_pred_expmap[i] )
 
       # Compute and save the errors here
@@ -490,6 +503,20 @@ def sample():
         hf.create_dataset( node_name, data=mean_mean_errors )
 
   return
+
+def draw():
+  actions = define_actions( args.action )
+
+  model = create_model(actions, args.sample)
+  if not args.use_cpu:
+    model = model.cuda()
+
+  fake_input_size = 54 + len(actions) if not args.omit_one_hot else 54
+  fake_encoder_inputs  = np.zeros((args.batch_size, args.seq_length_in-1, fake_input_size), dtype=float)
+  fake_decoder_inputs  = np.zeros((args.batch_size, args.seq_length_out, fake_input_size), dtype=float)
+  writer.add_graph(model, input_to_model = (Variable(torch.from_numpy(fake_encoder_inputs).float()), Variable(torch.from_numpy(fake_decoder_inputs).float())))
+  writer.flush()
+  writer.close()
 
 
 def define_actions( action ):
@@ -545,6 +572,7 @@ def read_all_data( actions, seq_length_in, seq_length_out, data_dir, one_hot ):
            seq_length_in, seq_length_out))
 
   train_subject_ids = [1,6,7,8,9,11]
+  # train_subject_ids = [1]
   test_subject_ids = [5]
 
   train_set, complete_train = data_utils.load_data( data_dir, train_subject_ids, actions, one_hot )
@@ -564,6 +592,8 @@ def read_all_data( actions, seq_length_in, seq_length_out, data_dir, one_hot ):
 def main():
   if args.sample:
     sample()
+  elif args.draw:
+    draw()
   else:
     train()
 

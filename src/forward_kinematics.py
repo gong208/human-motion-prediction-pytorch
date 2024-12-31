@@ -10,6 +10,7 @@ import viz
 import time
 import copy
 import data_utils
+import imageio
 
 def fkl( angles, parent, offset, rotInd, expmapInd ):
   """
@@ -160,8 +161,8 @@ def main():
 
   # numpy implementation
   with h5py.File( 'samples.h5', 'r' ) as h5f:
-    expmap_gt = h5f['expmap/gt/walking_0'][:]
-    expmap_pred = h5f['expmap/preds/walking_0'][:]
+    expmap_gt = h5f['expmap/gt/eating_0'][:]
+    expmap_pred = h5f['expmap/preds/eating_0'][:]
 
   nframes_gt, nframes_pred = expmap_gt.shape[0], expmap_pred.shape[0]
 
@@ -179,22 +180,34 @@ def main():
 
   # === Plot and animate ===
   fig = plt.figure()
-  ax = plt.gca(projection='3d')
+  ax = fig.add_subplot(projection='3d')
   ob = viz.Ax3DPose(ax)
-
-  # Plot the conditioning ground truth
+  
+  # Create a list to store frames
+  frames = []
+  
+  # Capture ground truth frames
   for i in range(nframes_gt):
-    ob.update( xyz_gt[i,:] )
-    plt.show(block=False)
+    ob.update(xyz_gt[i,:])
     fig.canvas.draw()
-    plt.pause(0.01)
-
-  # Plot the prediction
+    # Convert canvas to image
+    img = np.frombuffer(fig.canvas.tostring_rgb(), dtype=np.uint8)
+    img = img.reshape(fig.canvas.get_width_height()[::-1] + (3,))
+    frames.append(img)
+  
+  # Capture prediction frames
   for i in range(nframes_pred):
-    ob.update( xyz_pred[i,:], lcolor="#9b59b6", rcolor="#2ecc71" )
-    plt.show(block=False)
+    ob.update(xyz_pred[i,:], lcolor="#9b59b6", rcolor="#2ecc71")
+    # ob.update(xyz_pred[i,:], lcolor="#3498db", rcolor="#e74c3c")
     fig.canvas.draw()
-    plt.pause(0.01)
+    # Convert canvas to image
+    img = np.frombuffer(fig.canvas.tostring_rgb(), dtype=np.uint8)
+    img = img.reshape(fig.canvas.get_width_height()[::-1] + (3,))
+    frames.append(img)
+  
+  # Save as GIF
+  imageio.mimsave('eating_Sampling.gif', frames, fps=30)
+  plt.close()
 
 
 if __name__ == '__main__':

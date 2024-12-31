@@ -1,111 +1,146 @@
+# On human motion prediction using recurrent neural networks
 
-## human-motion-prediction
+2 criteria on performance of motion modeling:
 
-This is a pytorch implementation of the paper
+1. Short term prediction, measured quantitatively (MSE loss in angle space)
+   -: not practical for tracking due to clear discontinuities in the first prediction
+2. Longer time horizons measured qualitatively, to generate feasible motion
+   -: non-deterministic, cannot measured quantitatively
+   -: current algorithms strives to achieve long-term plausible motion, suffer from occasional unrealistic artifacts (foot sliding)
 
-Julieta Martinez, Michael J. Black, Javier Romero.
-_On human motion prediction using recurrent neural networks_. In CVPR 17.
+**this paper focuses on short-term prediction**
+Two main contributions:
+1. To deal with the known problem of failing to recover from their own mistakes if fed only ground-truth during training gin RNNs. **Introduces realistic error in training time without any scheduling by feeding the predictions of the net as it is done in test time.**
+2. Still unable to accurately represent the conditioning poses in its hidden representation, resulting in discontinuity in the first frame of the prediction. **Creates a residual architecture that models first order motion derivatives.**
 
-It can be found on arxiv as well: https://arxiv.org/pdf/1705.02445.pdf
+## Previous related woks
 
-The code in the original repository was written by [Julieta Martinez](https://github.com/una-dinosauria/) and [Javier Romero](https://github.com/libicocco/) and is accessible [here](/blob/master/src/translate.py).
+1. LSTM-3LR and ERD: gradually add noise to the input during training
+   -: noise scheduling is hard to tune
+2. SRNN
 
-If you have any comment on this fork you can email me at [enriccorona93@gmail.com]
+## Problems and solutions
 
-### Dependencies
+1. First frame discontinuity: jumps between conditioning ground truth and first predicted frame
 
-* [h5py](https://github.com/h5py/h5py) -- to save samples
-* [Pytorch](https://pytorch.org/)
+Used sequence-to-sequence (encoder + decoder) architecture to address short term prediction
+Added residual connection between the input and the output of each RNN cell, thus the velocity helps fix the motion continuity (residual)
 
-### Get this code and the data
+2. In order to improve robustness of the model, previous work added noise as part of input, hard to tune, invalid validation error, hurts short term prediction
 
-First things first, clone this repo and get the human3.6m dataset on exponential map format.
+During training, let decoder produce a sequence by always taking its own samples as input (sampling-based loss)
 
-```bash
-git clone https://github.com/enriccorona/human-motion-prediction-pytorch.git
-cd human-motion-prediction-pytorch
-mkdir data
-cd data
-wget http://www.cs.stanford.edu/people/ashesh/h3.6m.zip
-unzip h3.6m.zip
-rm h3.6m.zip
-cd ..
+## Architecture
+
+Either the residual addtion or the sampling based loss is closely related to the implementation of the architecture.
+
+1. Encoder phase
+
+```python
+for i in range(self.source_seq_len - 1):
+    state = self.cell(encoder_inputs[i], state)
+    state = F.dropout(state, self.dropout, training=self.training)
 ```
 
-### Quick demo and visualization
+Sequence of absolute joint angles are fed into the GRU. The GRU updates its hidden state at each timestep based on the current input and the previous hidden state. (dropout is a regularization preventing over-fitting)
+The final hidden state serves as a summary of the input sequence, capturing patterns and relationships in the data.
 
-The code in this fork should work exactly as in the original repo:
+2. Decoder phase
 
-For a quick demo, you can train for a few iterations and visualize the outputs
-of your model.
-
-To train, run
-```bash
-python src/translate.py --action walking --seq_length_out 25 --iterations 10000
+```python
+for i, inp in enumerate(decoder_inputs):
+      if loop_function is not None and prev is not None:
+          inp = loop_function(prev, i)
+      inp = inp.detach()
+      state = self.cell(inp, state)
+      output = inp + self.fc1(F.dropout(state, self.dropout, training=self.training))
+      outputs.append(output.view([1, batchsize, self.input_size]))
+      if loop_function is not None:
+        prev = output
 ```
 
-To save some samples of the model, run
-```bash
-python src/translate.py --action walking --seq_length_out 25 --iterations 10000 --sample --load 10000
+During the decoder phase, the sampling-based loss is implemented by updating inp based on the loop function. If loop_function is not None, then inp is updated with the previous output of the decoder itself (inp is the groundtruth of previous frame otherwise).
+The Residual addition is implemented in line
+
+```python
+output = inp + self.fc1(F.dropout(state, self.dropout, training=self.training))
 ```
 
-Finally, to visualize the samples run
-```bash
-python src/forward_kinematics.py
+in which `inp` is the absolute joint angle of previous frame. By adding the fully connected layer to the previous absolute joint angle, the fully connected layer is trained to learn to extract the velocity from the hidden state, since the loss function is defined as `step_loss = (preds - decoder_outputs)**2` in the training step.
+
+## Results
+
+Below are the results of running model with residual and multiple actions, model with residual and single action, and model only with the sampling-based loss with 10000 iterations.
+![validation loss](imgs/validation_loss.png)
+
+The result shows that the model with residual and multiple actions indeed reaches the best quantitative result, while from the gif we see that it doesn't really generate plausible long-term motion predictions.
+The note in the github repository also points out that the model with sampling-based loss produces the realistic long-term motion with loss computed over 1 second.
+This also corresponds to the statement in the paper that trying to address both problems at once is very challenging, especially in the absence of a proper quantitative evaluation for long-term plausibility.
+
+| milliseconds | 80 | 160 | 320 | 400 | 560 | 1000 |
+|--------------|----|-----|-----|-----|-----|------|
+walking_Residual_MA          | 0.382 | 0.648 | 0.861 | 0.952 |   n/a |   n/a |
+walking_Residual_SA          | 0.396 | 0.652 | 0.832 | 0.893 |   n/a |   n/a |
+walking_Sampling             | 0.369 | 0.620 | 0.845 | 0.931 | 1.068 | 1.241 |
+eating_Residual_MA           | __0.260__ | __0.444__ | __0.681__ | __0.842__ |   n/a |   n/a |
+eating_Residual_SA           | 0.274 | 0.464 | 0.740 | 0.918 |   n/a |   n/a |
+eating_Sampling              | 0.297 | 0.504 | 0.776 | 0.946 | 1.164 | 1.487 |
+
+
+
+<div style="text-align: center;">
+  <div style="display: inline-block; margin-right: 5px; text-align: center;">
+    <img src="imgs/walking_Residual_MA.gif" alt="walking_Residual_MA" style="width: 150px; height: auto;">
+    <p>Walking - Residual MA</p>
+  </div>
+  <div style="display: inline-block; margin-right: 5px; text-align: center;">
+    <img src="imgs/walking_Residual_SA.gif" alt="walking_Residual_SA" style="width: 150px; height: auto;">
+    <p>Walking - Residual SA</p>
+  </div>
+  <div style="display: inline-block; text-align: center;">
+    <img src="imgs/walking_sampling.gif" alt="walking_Sampling" style="width: 150px; height: auto;">
+    <p>Walking - Sampling</p>
+  </div>
+</div>
+
+<div style="text-align: center; margin-top: 20px;">
+  <div style="display: inline-block; margin-right: 5px; text-align: center;">
+    <img src="imgs/eating_Residual_MA.gif" alt="eating_Residual_MA" style="width: 150px; height: auto;">
+    <p>Eating - Residual MA</p>
+  </div>
+  <div style="display: inline-block; margin-right: 5px; text-align: center;">
+    <img src="imgs/eating_Residual_SA.gif" alt="eating_Residual_SA" style="width: 150px; height: auto;">
+    <p>Eating - Residual SA</p>
+  </div>
+  <div style="display: inline-block; text-align: center;">
+    <img src="imgs/eating_Sampling.gif" alt="eating_Sampling" style="width: 150px; height: auto;">
+    <p>Eating - Sampling</p>
+  </div>
+</div>
+
+
+## Why couldn't the residual model generate plausible long predictions?
+
+From the code we see that, for models with residual, the loss for 560ns and 1000ns are n/a only because they are not displayed (seq_length_out is default to 10):
+```python, translate.py
+for ms in [1,3,7,9,13,24]:
+  if args.seq_length_out >= ms+1:
+    print(" {0:.3f} |".format( mean_mean_errors[ms] ), end="")
+  else:
+    print("   n/a |", end="")
 ```
 
-This should create a visualization similar to this one
+During training, the loss computation is the same for either sapling-based model or residual model:
 
-<p align="center">
-  <img src="https://raw.githubusercontent.com/una-dinosauria/human-motion-prediction/master/imgs/walking.gif"><br><br>
-</p>
+```python
+preds = model(encoder_inputs, decoder_inputs)
+step_loss = (preds-decoder_outputs)**2
+step_loss = step_loss.mean()
 
-
-### Running average baselines
-
-To reproduce the running average baseline results from our paper, run
-
-`python src/baselines.py`
-
-### RNN models
-
-To train and reproduce the results of our models, use the following commands
-
-| model      | arguments | training time (gtx 1080) | notes |
-| ---        | ---       | ---   | --- |
-| Sampling-based loss (SA) | `python src/translate.py --action walking --seq_length_out 25` | 45s / 1000 iters | Realistic long-term motion, loss computed over 1 second. |
-| Residual (SA)            | `python src/translate.py --residual_velocities --action walking` | 35s / 1000 iters |  |
-| Residual unsup. (MA)     | `python src/translate.py --residual_velocities --learning_rate 0.005 --omit_one_hot` | 65s / 1000 iters | |
-| Residual sup. (MA)       | `python src/translate.py --residual_velocities --learning_rate 0.005` | 65s / 1000 iters | best quantitative.|
-| Untied       | `python src/translate.py --residual_velocities --learning_rate 0.005 --architecture basic` | 70s / 1000 iters | |
-
-
-You can substitute the `--action walking` parameter for any action in
-
-```
-["directions", "discussion", "eating", "greeting", "phoning",
- "posing", "purchases", "sitting", "sittingdown", "smoking",
- "takingphoto", "waiting", "walking", "walkingdog", "walkingtogether"]
+step_loss.backward()
+optimiser.step()
 ```
 
-or `--action all` (default) to train on all actions.
+This means that the residual model **is** trained based on the loss for longer time-step. Then why only the sampling-based model produces more realistic and plausible predictions for longer time steps?
 
-### Citing
-
-If you use our code, please cite our work
-
-```
-@inproceedings{julieta2017motion,
-  title={On human motion prediction using recurrent neural networks},
-  author={Martinez, Julieta and Black, Michael J. and Romero, Javier},
-  booktitle={CVPR},
-  year={2017}
-}
-```
-
-### Acknowledgments
-
-The pre-processed human 3.6m dataset and some of our evaluation code (specially under `src/data_utils.py`) was ported/adapted from [SRNN](https://github.com/asheshjain399/RNNexp/tree/srnn/structural_rnn) by [@asheshjain399](https://github.com/asheshjain399).
-
-### Licence
-MIT
+One guess is that the residual model is modeling the first derivative instead of modeling the poses directly, but the loss is calculated based on the pose instead of velocity, so the mistake in the prediction of velocity cannot be well fixed by the loss function.

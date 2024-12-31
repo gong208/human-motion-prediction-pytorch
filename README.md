@@ -90,30 +90,30 @@ eating_Sampling              | 0.297 | 0.504 | 0.776 | 0.946 | 1.164 | 1.487 |
 
 <div style="text-align: center;">
   <div style="display: inline-block; margin-right: 5px; text-align: center;">
-    <img src="imgs/walking_Residual_MA.gif" alt="walking_Residual_MA" style="width: 150px; height: auto;">
+    <img src="imgs/walking_Residual_MA.gif" alt="walking_Residual_MA" style="width: 200px; height: auto;">
     <p>Walking - Residual MA</p>
   </div>
   <div style="display: inline-block; margin-right: 5px; text-align: center;">
-    <img src="imgs/walking_Residual_SA.gif" alt="walking_Residual_SA" style="width: 150px; height: auto;">
+    <img src="imgs/walking_Residual_SA.gif" alt="walking_Residual_SA" style="width: 200px; height: auto;">
     <p>Walking - Residual SA</p>
   </div>
   <div style="display: inline-block; text-align: center;">
-    <img src="imgs/walking_sampling.gif" alt="walking_Sampling" style="width: 150px; height: auto;">
+    <img src="imgs/walking_sampling.gif" alt="walking_Sampling" style="width: 200px; height: auto;">
     <p>Walking - Sampling</p>
   </div>
 </div>
 
 <div style="text-align: center; margin-top: 20px;">
   <div style="display: inline-block; margin-right: 5px; text-align: center;">
-    <img src="imgs/eating_Residual_MA.gif" alt="eating_Residual_MA" style="width: 150px; height: auto;">
+    <img src="imgs/eating_Residual_MA.gif" alt="eating_Residual_MA" style="width: 200px; height: auto;">
     <p>Eating - Residual MA</p>
   </div>
   <div style="display: inline-block; margin-right: 5px; text-align: center;">
-    <img src="imgs/eating_Residual_SA.gif" alt="eating_Residual_SA" style="width: 150px; height: auto;">
+    <img src="imgs/eating_Residual_SA.gif" alt="eating_Residual_SA" style="width: 200px; height: auto;">
     <p>Eating - Residual SA</p>
   </div>
   <div style="display: inline-block; text-align: center;">
-    <img src="imgs/eating_Sampling.gif" alt="eating_Sampling" style="width: 150px; height: auto;">
+    <img src="imgs/eating_Sampling.gif" alt="eating_Sampling" style="width: 200px; height: auto;">
     <p>Eating - Sampling</p>
   </div>
 </div>
